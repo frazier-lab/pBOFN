@@ -88,7 +88,7 @@ class GaussianProcessNetwork(Model):
     def forward(self, x: Tensor) -> MultivariateNormalNetwork:
         return MultivariateNormalNetwork(self.node_GPs, self.dag, x, self.active_input_indices, self.normalization_constant)
     
-    def condition_on_observations(self, X: Tensor, Y: Tensor, k=None, **kwargs: Any) -> Model:
+    def condition_on_observations(self, X: Tensor, Y: Tensor, node=None, **kwargs: Any) -> Model:
         r"""Condition the model on new observations.
         Args:
             X: A `batch_shape x n' x d`-dim Tensor, where `d` is the dimension of
