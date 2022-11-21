@@ -88,7 +88,7 @@ class GaussianProcessNetwork(Model):
     def forward(self, x: Tensor) -> MultivariateNormalNetwork:
         return MultivariateNormalNetwork(self.node_GPs, self.dag, x, self.active_input_indices, self.normalization_constant)
     
-    def condition_on_observations(self, X: Tensor, Y: Tensor, node=None, **kwargs: Any) -> Model:
+    def condition_on_observations(self, X: Tensor, Y: Tensor, nodes=None, **kwargs: Any) -> Model:
         r"""Condition the model on new observations.
         Args:
             X: A `batch_shape x n' x d`-dim Tensor, where `d` is the dimension of
@@ -102,6 +102,7 @@ class GaussianProcessNetwork(Model):
                 standard broadcasting semantics. If `Y` has fewer batch dimensions
                 than `X`, it is assumed that the missing batch dimensions are
                 the same for all `Y`.
+            nodes: A list of node indices selected from 0 to `m-1`.
         Returns:
             A `Model` object of the same type, representing the original model
             conditioned on the new observations `(X, Y)` (and possibly noise
@@ -110,23 +111,29 @@ class GaussianProcessNetwork(Model):
         fantasy_models = [None for k in range(self.n_nodes)]
 
         for k in self.root_nodes:
-            if self.active_input_indices is not None:
-                X_node_k = X[..., self.active_input_indices[k]]
-            else:
-                X_node_k = X
-            Y_node_k = Y[..., [k]]
-            fantasy_models[k] = self.node_GPs[k].condition_on_observations(X_node_k, Y_node_k, noise=torch.ones(Y_node_k.shape[1:]) * 1e-6)
-        
-        for k in range(self.n_nodes):
-            if fantasy_models[k] is None:
-                aux = Y[..., self.dag.get_parent_nodes(k)].clone()
-                for j in range(len(self.dag.get_parent_nodes(k))):
-                    aux[..., j] = (aux[..., j] - self.normalization_constant_lower[k][j])/(self.normalization_constant_upper[k][j] - self.normalization_constant_lower[k][j])
-                aux_shape = [aux.shape[0]] + [1] * X[..., self.active_input_indices[k]].ndim
-                X_aux = X[..., self.active_input_indices[k]].unsqueeze(0).repeat(*aux_shape)
-                X_node_k = torch.cat([X_aux, aux], -1)
+            if k in nodes:
+                if self.active_input_indices is not None:
+                    X_node_k = X[..., self.active_input_indices[k]]
+                else:
+                    X_node_k = X
                 Y_node_k = Y[..., [k]]
                 fantasy_models[k] = self.node_GPs[k].condition_on_observations(X_node_k, Y_node_k, noise=torch.ones(Y_node_k.shape[1:]) * 1e-6)
+            else:
+                fantasy_models[k] = self.node_GPs[k]
+            
+        for k in range(self.n_nodes):
+            if k in nodes:
+                if fantasy_models[k] is None:
+                    aux = Y[..., self.dag.get_parent_nodes(k)].clone()
+                    for j in range(len(self.dag.get_parent_nodes(k))):
+                        aux[..., j] = (aux[..., j] - self.normalization_constant_lower[k][j])/(self.normalization_constant_upper[k][j] - self.normalization_constant_lower[k][j])
+                    aux_shape = [aux.shape[0]] + [1] * X[..., self.active_input_indices[k]].ndim
+                    X_aux = X[..., self.active_input_indices[k]].unsqueeze(0).repeat(*aux_shape)
+                    X_node_k = torch.cat([X_aux, aux], -1)
+                    Y_node_k = Y[..., [k]]
+                    fantasy_models[k] = self.node_GPs[k].condition_on_observations(X_node_k, Y_node_k, noise=torch.ones(Y_node_k.shape[1:]) * 1e-6)
+            else:
+                fantasy_models[k] = self.node_GPs[k]
 
         return GaussianProcessNetwork(dag=self.dag, train_X=X, train_Y=Y, active_input_indices=self.active_input_indices, node_GPs=fantasy_models, normalization_constant_lower=self.normalization_constant_lower, normalization_constant_upper=self.normalization_constant_upper)
         
